@@ -1,7 +1,7 @@
 -- Dungeon.lua (loads via your main bridge)
 -- Adds: Auto Join (all difficulties), Auto Kill (TP → nearest),
--- sliders (Attack Speed / TP Stick / Next Mob Delay), and Restaurant Raid
--- NOTE: Uses your main bridge getgenv().MY_SCRIPT (ToServer, Helpers, Register)
+-- sliders (Attack Speed / TP Stick / Next Mob Delay),
+-- Restaurant Raid (one-shot) + Auto Restart when not active.
 
 getgenv().MY_SCRIPT = getgenv().MY_SCRIPT or {}
 
@@ -9,7 +9,7 @@ getgenv().MY_SCRIPT.Register(function(Window)
     local ToServer = getgenv().MY_SCRIPT.ToServer
     local H = getgenv().MY_SCRIPT.Helpers or {}
 
-    -- ===== Fallback helpers (in case main didn't expose them) =====
+    -- ===== Fallback helpers (if main didn't expose them) =====
     H.getMonsterCFrame = H.getMonsterCFrame or function(m)
         if m:IsA("Model") then
             if m.PrimaryPart then return m.PrimaryPart.CFrame end
@@ -90,9 +90,7 @@ getgenv().MY_SCRIPT.Register(function(Window)
     end
 
     local function joinDungeon(name)
-        local args = {
-            { Action = "_Enter_Dungeon", Name = name }
-        }
+        local args = { { Action = "_Enter_Dungeon", Name = name } }
         ToServer:FireServer(unpack(args))
         print("[Dungeon] Join →", name)
     end
@@ -115,7 +113,6 @@ getgenv().MY_SCRIPT.Register(function(Window)
                     local cf, mobId = H.getMonsterCFrame(mob), H.getMonsterId(mob)
                     if cf and mobId then
                         H.instantTP(cf)
-                        -- stick until dead/despawn
                         while AutoKill and mob and mob.Parent do
                             ToServer:FireServer({ Id = mobId, Action = "_Mouse_Click" })
                             task.wait(AttackDelay)
@@ -132,7 +129,7 @@ getgenv().MY_SCRIPT.Register(function(Window)
                         task.wait(0.15)
                     end
                 else
-                    task.wait(0.40) -- waiting for waves/start
+                    task.wait(0.40)
                 end
             end
         end)
@@ -206,42 +203,80 @@ getgenv().MY_SCRIPT.Register(function(Window)
         Callback = function(v) JoinRetry = v end,
     })
 
-    -- ===== Restaurant Raid (one-shot toggle + button) =====
+    -- ===== Restaurant Raid =====
     local RR_Group = DungeonTab:AddRightGroupbox("Restaurant Raid", "pizza")
     local RR_FiredOnce = false
+    local RR_AutoRestart = false
+    local RR_CheckInterval = 2.0 -- seconds
+
+    local function hasActiveRestaurantRaid()
+        local dng = workspace:FindFirstChild("Dungeons")
+        if not dng then return false end
+        for _, c in ipairs(dng:GetChildren()) do
+            local n = tostring(c.Name or "")
+            if n:find("Restaurant_Raid", 1, true) then
+                return true
+            end
+        end
+        return false
+    end
 
     local function fireRestaurantRaidOnce()
         if RR_FiredOnce then return end
         RR_FiredOnce = true
-        local args = {
-            { Action = "_Enter_Dungeon", Name = "Restaurant_Raid" }
-        }
+        local args = { { Action = "_Enter_Dungeon", Name = "Restaurant_Raid" } }
         ToServer:FireServer(unpack(args))
         print("[Dungeon] Join → Restaurant_Raid")
     end
 
-    -- Fires exactly once when turned ON; toggle OFF to re-arm
+    -- One-shot toggle (fires when turned ON; OFF re-arms)
     RR_Group:AddToggle("RR_Toggle", {
-        Text = "Restaurant Raid",
+        Text = "Restaurant Raid (one-shot)",
         Default = false,
         Callback = function(on)
             if on then
                 fireRestaurantRaidOnce()
             else
-                RR_FiredOnce = false -- re-arm
+                RR_FiredOnce = false
             end
         end,
     })
 
-    -- Button fires once per click
     RR_Group:AddButton({
         Text = "Start Restaurant Raid Now",
         Func = function()
-            local args = {
-                { Action = "_Enter_Dungeon", Name = "Restaurant_Raid" }
-            }
+            local args = { { Action = "_Enter_Dungeon", Name = "Restaurant_Raid" } }
             ToServer:FireServer(unpack(args))
             print("[Dungeon] Join (manual) → Restaurant_Raid")
         end,
+    })
+
+    -- Auto Restart when not active (polls and re-joins)
+    RR_Group:AddToggle("RR_AutoRestart", {
+        Text = "Auto Restart (when not active)",
+        Default = false,
+        Callback = function(on)
+            RR_AutoRestart = on
+            if on then
+                task.spawn(function()
+                    while RR_AutoRestart do
+                        if not hasActiveRestaurantRaid() then
+                            -- if it's not active, (re)join now; keep trying every JoinRetry until it appears
+                            joinDungeon("Restaurant_Raid")
+                            task.wait(JoinRetry)
+                        else
+                            task.wait(RR_CheckInterval)
+                        end
+                    end
+                end)
+            end
+        end,
+    })
+
+    RR_Group:AddSlider("RR_CheckInterval", {
+        Text = "Recheck Interval (s)",
+        Default = RR_CheckInterval,
+        Min = 0.5, Max = 10.0, Rounding = 1,
+        Callback = function(v) RR_CheckInterval = v end,
     })
 end)
