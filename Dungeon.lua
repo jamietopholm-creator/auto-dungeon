@@ -45,7 +45,7 @@ getgenv().MY_SCRIPT.Register(function(Window)
     local DG_Right = DungeonTab:AddRightGroupbox("Automation", "swords")
 
     -- ===== State =====
-    local AutoKillEasy = false
+    local AutoKill = false
     local AttackDelay  = 0.20
     local TPStickDelay = 0.08
     local NextMobDelay = 0.05
@@ -69,6 +69,7 @@ getgenv().MY_SCRIPT.Register(function(Window)
         local char = LocalPlayer.Character
         local hrp = char and char:FindFirstChild("HumanoidRootPart")
         if not hrp then return nil end
+
         local best, bestDist = nil, math.huge
         for _, m in ipairs(folder:GetChildren()) do
             if m and m.Parent then
@@ -85,12 +86,19 @@ getgenv().MY_SCRIPT.Register(function(Window)
     end
 
     local function joinDungeon(name)
-        ToServer:FireServer({ { Action = "_Enter_Dungeon", Name = name } })
+        -- IMPORTANT: use args + unpack so FireServer receives the inner table
+        local args = {
+            {
+                Action = "_Enter_Dungeon",
+                Name   = name,
+            }
+        }
+        ToServer:FireServer(unpack(args))
         print("[Dungeon] Join request →", name)
     end
 
     -- ===== Loops =====
-    local function startAutoJoin(name, stateRef)
+    local function startAutoJoin(stateRef, name)
         task.spawn(function()
             while stateRef.active do
                 joinDungeon(name)
@@ -101,13 +109,14 @@ getgenv().MY_SCRIPT.Register(function(Window)
 
     local function startAutoKill()
         task.spawn(function()
-            while AutoKillEasy do
+            while AutoKill do
                 local mob = pickNearestMob()
                 if mob then
                     local cf, mobId = H.getMonsterCFrame(mob), H.getMonsterId(mob)
                     if cf and mobId then
                         H.instantTP(cf)
-                        while AutoKillEasy and mob and mob.Parent do
+                        -- stick to this mob until it despawns
+                        while AutoKill and mob and mob.Parent do
                             ToServer:FireServer({ Id = mobId, Action = "_Mouse_Click" })
                             task.wait(AttackDelay)
                             local cf2 = H.getMonsterCFrame(mob)
@@ -118,18 +127,20 @@ getgenv().MY_SCRIPT.Register(function(Window)
                                 break
                             end
                         end
+                        -- small delay before locking onto the next mob
                         task.wait(NextMobDelay)
                     else
                         task.wait(0.15)
                     end
                 else
+                    -- likely waiting for waves/start
                     task.wait(0.4)
                 end
             end
         end)
     end
 
-    -- ===== Join Toggles =====
+    -- ===== Auto Join toggles (Easy → Nightmare) =====
     local joins = {
         { key="DG_AutoJoinEasy",      text="Auto Join Easy Dungeon",      name="Dungeon_Easy" },
         { key="DG_AutoJoinMedium",    text="Auto Join Medium Dungeon",    name="Dungeon_Medium" },
@@ -146,12 +157,12 @@ getgenv().MY_SCRIPT.Register(function(Window)
             Default = false,
             Callback = function(on)
                 j.state.active = on
-                if on then startAutoJoin(j.name, j.state) end
+                if on then startAutoJoin(j.state, j.name) end
             end,
         })
     end
 
-    -- Manual buttons
+    -- Manual join buttons
     for _, j in ipairs(joins) do
         DG_Left:AddButton({
             Text = "Join "..j.name,
@@ -159,12 +170,12 @@ getgenv().MY_SCRIPT.Register(function(Window)
         })
     end
 
-    -- ===== Kill Controls =====
-    DG_Right:AddToggle("DG_AutoKillEasy", {
+    -- ===== Kill toggles/sliders =====
+    DG_Right:AddToggle("DG_AutoKill", {
         Text = "Auto Kill Mobs (TP → nearest)",
         Default = false,
         Callback = function(on)
-            AutoKillEasy = on
+            AutoKill = on
             if on then startAutoKill() end
         end,
     })
@@ -193,7 +204,7 @@ getgenv().MY_SCRIPT.Register(function(Window)
     DG_Left:AddSlider("DG_JoinRetry", {
         Text = "Join Retry (s)",
         Default = JoinRetry,
-        Min = 0.01, Max = 15.0, Rounding = 1,
+        Min = 2.0, Max = 15.0, Rounding = 1,
         Callback = function(v) JoinRetry = v end,
     })
 end)
