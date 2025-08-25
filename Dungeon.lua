@@ -193,7 +193,7 @@ getgenv().MY_SCRIPT.Register(function(Window)
     DG_Left:AddSlider("DG_JoinRetry", {
         Text = "Join Retry (s)",
         Default = JoinRetry,
-        Min = 2.0, Max = 15.0, Rounding = 1,
+        Min = 0.01, Max = 15.0, Rounding = 1,
         Callback = function(v) JoinRetry = v end,
     })
 end)
