@@ -1,11 +1,15 @@
 -- Dungeon.lua (loads via your main bridge)
+-- Adds: Auto Join (all difficulties), Auto Kill (TP → nearest),
+-- sliders (Attack Speed / TP Stick / Next Mob Delay), and Restaurant Raid
+-- NOTE: Uses your main bridge getgenv().MY_SCRIPT (ToServer, Helpers, Register)
+
 getgenv().MY_SCRIPT = getgenv().MY_SCRIPT or {}
 
 getgenv().MY_SCRIPT.Register(function(Window)
     local ToServer = getgenv().MY_SCRIPT.ToServer
     local H = getgenv().MY_SCRIPT.Helpers or {}
 
-    -- Fallback helpers
+    -- ===== Fallback helpers (in case main didn't expose them) =====
     H.getMonsterCFrame = H.getMonsterCFrame or function(m)
         if m:IsA("Model") then
             if m.PrimaryPart then return m.PrimaryPart.CFrame end
@@ -45,7 +49,7 @@ getgenv().MY_SCRIPT.Register(function(Window)
     local DG_Right = DungeonTab:AddRightGroupbox("Automation", "swords")
 
     -- ===== State =====
-    local AutoKill = false
+    local AutoKill     = false
     local AttackDelay  = 0.20
     local TPStickDelay = 0.08
     local NextMobDelay = 0.05
@@ -86,15 +90,11 @@ getgenv().MY_SCRIPT.Register(function(Window)
     end
 
     local function joinDungeon(name)
-        -- IMPORTANT: use args + unpack so FireServer receives the inner table
         local args = {
-            {
-                Action = "_Enter_Dungeon",
-                Name   = name,
-            }
+            { Action = "_Enter_Dungeon", Name = name }
         }
         ToServer:FireServer(unpack(args))
-        print("[Dungeon] Join request →", name)
+        print("[Dungeon] Join →", name)
     end
 
     -- ===== Loops =====
@@ -115,7 +115,7 @@ getgenv().MY_SCRIPT.Register(function(Window)
                     local cf, mobId = H.getMonsterCFrame(mob), H.getMonsterId(mob)
                     if cf and mobId then
                         H.instantTP(cf)
-                        -- stick to this mob until it despawns
+                        -- stick until dead/despawn
                         while AutoKill and mob and mob.Parent do
                             ToServer:FireServer({ Id = mobId, Action = "_Mouse_Click" })
                             task.wait(AttackDelay)
@@ -127,14 +127,12 @@ getgenv().MY_SCRIPT.Register(function(Window)
                                 break
                             end
                         end
-                        -- small delay before locking onto the next mob
                         task.wait(NextMobDelay)
                     else
                         task.wait(0.15)
                     end
                 else
-                    -- likely waiting for waves/start
-                    task.wait(0.4)
+                    task.wait(0.40) -- waiting for waves/start
                 end
             end
         end)
@@ -206,5 +204,44 @@ getgenv().MY_SCRIPT.Register(function(Window)
         Default = JoinRetry,
         Min = 2.0, Max = 15.0, Rounding = 1,
         Callback = function(v) JoinRetry = v end,
+    })
+
+    -- ===== Restaurant Raid (one-shot toggle + button) =====
+    local RR_Group = DungeonTab:AddRightGroupbox("Restaurant Raid", "pizza")
+    local RR_FiredOnce = false
+
+    local function fireRestaurantRaidOnce()
+        if RR_FiredOnce then return end
+        RR_FiredOnce = true
+        local args = {
+            { Action = "_Enter_Dungeon", Name = "Restaurant_Raid" }
+        }
+        ToServer:FireServer(unpack(args))
+        print("[Dungeon] Join → Restaurant_Raid")
+    end
+
+    -- Fires exactly once when turned ON; toggle OFF to re-arm
+    RR_Group:AddToggle("RR_Toggle", {
+        Text = "Restaurant Raid",
+        Default = false,
+        Callback = function(on)
+            if on then
+                fireRestaurantRaidOnce()
+            else
+                RR_FiredOnce = false -- re-arm
+            end
+        end,
+    })
+
+    -- Button fires once per click
+    RR_Group:AddButton({
+        Text = "Start Restaurant Raid Now",
+        Func = function()
+            local args = {
+                { Action = "_Enter_Dungeon", Name = "Restaurant_Raid" }
+            }
+            ToServer:FireServer(unpack(args))
+            print("[Dungeon] Join (manual) → Restaurant_Raid")
+        end,
     })
 end)
